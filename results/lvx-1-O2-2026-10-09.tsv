@@ -1,5 +1,7 @@
 benchmark	arch	opt	correct	cycles	bundles_dyn	text_bytes	insns_static	bundles_static
 basicmath_small	lvx-1	2	fp-6ulp	91888654	44359850	69768	14938	8818
+basicmath_small	lvx-1	2	fp-6ulp	91888654	44359850	69768	14938	8818
+bitcnts	lvx-1	2	noref	40824488	13026449	65176	14260	8498
 qsort_small	lvx-1	2	ok	19812261	12102753	100112	21788	12918
 susan_smoothing	lvx-1	2	ok	17703343	12084050	96912	21282	12693
 susan_edges	lvx-1	2	ok	2894302	1254518	96912	21282	12693
