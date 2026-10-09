@@ -204,7 +204,12 @@ void sha_stream(SHA_INFO *sha_info, FILE *fin)
 
 void sha_print(SHA_INFO *sha_info)
 {
-    printf("%08lx %08lx %08lx %08lx %08lx\n",
+    /* LVX: %08x, not %08lx -- LONG is uint32_t now, and passing it to an `l'
+       conversion is a varargs type mismatch.  x86-64 tolerates it because the
+       promoted value lands in the same register; LVX need not, and printed
+       unrelated digits.  Both this and the typedef are needed; either alone
+       leaves the output wrong.  */
+    printf("%08x %08x %08x %08x %08x\n",
 	sha_info->digest[0], sha_info->digest[1], sha_info->digest[2],
 	sha_info->digest[3], sha_info->digest[4]);
 }
