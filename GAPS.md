@@ -373,3 +373,49 @@ deterministic input. Checked after the stale-newlib fix, when `fft 4 16` first
 ran to completion and its numbers did not match native — the second time in this
 exercise that a cross-libc comparison looked like a miscompile and was not
 (`sha` and `LITTLE_ENDIAN` was the first).
+
+## Checked against MiBench's own reference outputs
+
+`https://vhosts.eecs.umich.edu/mibench/output.html` ships the expected output of
+every benchmark, "generated using an x86 machine running Redhat Linux 7.2" —
+32-bit, 2001. **It carries no timing data**, so it is a correctness oracle
+rather than a performance one; the published performance figures are in the
+Guthaus et al. paper, not on the site.
+
+Diffed against the four benchmarks that run at shipped-small input:
+
+| benchmark | result |
+|---|---|
+| `search_small` | **identical** |
+| `adpcm_rawcaudio` | **identical**, all 342,216 bytes |
+| `basicmath_small` | 6 lines of 19,731 differ by 1 ulp — **the reference is the outlier** |
+| `sha` | structurally different — the LP64 `LONG` of §4 |
+
+Two exact matches across a 24-year-old architecture gap is the strongest
+correctness evidence in this document: `adpcm` encodes a 1.37 MB stream to
+342,216 bytes of ADPCM with every byte agreeing.
+
+**The `basicmath` difference is not an LVX error.** The six values come from
+`for (X = 0.0; X <= 2*PI + 1e-6; X += PI/180)`, an accumulated sum printed at
+`%.12f`. Printing the bits as well as the decimals shows LVX and today's glibc
+agreeing exactly on all six:
+
+```
+deg= 97  %a=0x1.b16670e053653p+0  %.12f=1.692969374435   <- LVX and modern glibc
+                                        1.692969374434   <- the 2001 reference
+```
+
+So LVX matches a current x86-64 bit-for-bit and the reference does not. The
+likely cause is the era: an i386 of that vintage accumulated in x87's 80-bit
+registers, which changes a long running sum. That is the caveat MiBench's own
+page gives — "known to generate machine specific output ... especially for
+benchmarks that generate floating point numbers" — and it means the reference
+output cannot arbitrate floating point. Compare against a modern native build
+for those, and keep the reference for the integer benchmarks.
+
+**`sha` confirms §4 from the other direction.** The reference prints five
+**8**-hex-digit words (`320c22e9 7b1ed440 ...`) where LVX prints five
+**16**-digit ones: on a 32-bit host `unsigned long` is exactly the 32 bits the
+algorithm needs, so the 2001 output is correct SHA-0 and every LP64 build is
+wrong. The fix is the benchmark's `LONG`, as §4 says, and the reference output
+is then the thing to check against.
