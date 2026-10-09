@@ -45,7 +45,7 @@ Values in that column:
 | `ok` | byte-identical to upstream's reference |
 | `ok-ws` | identical ignoring blank lines (text references only) |
 | `fp-Nulp` | `basicmath` only: N lines differ by 1 ulp. **LVX is right** — it agrees with a modern x86-64 bit-for-bit; the 2001 x87 reference is the outlier. See `reference-output/REFERENCE.md`. Expect `fp-6ulp` |
-| `noref` | upstream ships no reference for this invocation (`crc32`, `fft`, `rijndael_enc`) — metrics only |
+| `noref` | upstream ships no reference for this invocation (`crc32`, `fft`, `rijndael_enc`), or the output is not comparable to one (`bitcnts`, which prints its own elapsed times) — metrics only |
 | `MISMATCH` | a real failure. Investigate before reading any number in the row |
 | `exitN`, `timeout`, `buildfail` | did not complete |
 
@@ -72,6 +72,17 @@ reads none. gem5 inherits the harness's stdin, and the harness's stdin is
 eats the rest of the table and the run stops early. It presented as `adpcm`
 reading the benchmark table as PCM.
 
+## `bitcnts` prints seconds, and they are simulated
+
+`bitcount` is the one benchmark whose timing path exercises `$frcc`, and it
+reports the elapsed time of each of its seven kernels. Those numbers are
+cycles rescaled by `_LVX_CPU_FREQ`, which is 1 GHz and must stay equal to the
+ISS clock domain (`run_lvx.py`'s `SrcClockDomain(clock="1GHz")`) — they are
+exact *simulated* time, never wall-clock, and they move if either constant
+does. So its row is `noref`: track its metrics, not its printout. The two
+constants disagreed (800 MHz against 1 GHz) until 2026-10-09, which is
+`GAPS.md` §2.
+
 ## Adding a benchmark
 
 One line in `benchmarks.def`:
@@ -92,9 +103,6 @@ about LVX.
 
 ## What is not here yet
 
-- **`bitcount`** does not link: it calls `clock()`, which needs
-  `__lvx_counter_num`, undefined in lvx-newlib. A weak stub returning 0 would
-  be enough for performance tracking. `GAPS.md` §2.
 - **`patricia`** needs `err.h` and `netinet/in.h`, which newlib does not ship,
   though it uses only `struct in_addr` and `htonl`. `GAPS.md` §3.
 - **Large datasets are never run** — not a limitation of the harness but a

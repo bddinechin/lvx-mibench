@@ -188,16 +188,36 @@ Two things found on the way, both of the silent kind:
   while `CLOCKS_PER_SEC` claimed milliseconds, so any program dividing by it
   over-reported elapsed time by 1000x. `gettimeofday` was right all along,
   which is what exposed it.
+- **`_LVX_CPU_FREQ` was 800 MHz, and the LVX core clock is 1 GHz** — a further
+  silent 1.25x, in the same direction. The constant came over verbatim from
+  KVX's Coolidge silicon under a note in `cpu.h` saying there was "no real LVX
+  hardware or ISS yet to measure"; there is an ISS, and `run_lvx.py` clocks it
+  `SrcClockDomain(clock="1GHz")`, which gem5 confirms at 1000 ticks per cycle.
+  Nothing could catch the disagreement from inside the guest: every libgloss
+  conversion divides by this one constant, so `clock()`, `times()` and
+  `gettimeofday()` all agreed with each other while all being 1.25x too large.
+  Only gem5's own exit line arbitrates. Fixed to 1 GHz, with the rule recorded
+  in `cpu.h`: keep it equal to the ISS clock domain.
+- **And a build trap worth more than either**: the staged target headers in
+  `lvx-newlib-build/lvx-mbr/newlib/targ-include/` are produced by
+  `stmp-targ-include: config.status` — a rule depending on `config.status`, not
+  on the headers. libc and libgloss compile against that copy, so the first
+  `_LVX_CPU_FREQ` fix had **no effect at all**: `clock()` kept dividing by 800
+  from an eleven-day-old staged `cpu.h` while the installed header said 1000.
+  Deleting `*.o` does not help. See `lvx-csw/README.md` under `lvx-newlib`.
 
-Measured on both cores around a 1,274,569-cycle loop: `clock()` 1500 us,
-`gettimeofday` 1500 us, `times` utime 1582 — consistent with each other and
-with 1.27M cycles at the nominal 800 MHz. validation 55/55 both cores and
+Measured on both cores around a 500,008-cycle loop: `clock()` 500 us,
+`gettimeofday` 500 us, `times` utime 566 (the whole run to that point, of
+575,665 cycles total) — exact at 1 GHz, where `frcc delta / 1000` is the
+microsecond figure by construction. validation 55/55 both cores and
 run_diff.sh 96/96 unchanged.
 
-**One caveat that does not go away.** `_LVX_CPU_FREQ` is a nominal 800 MHz in a
-header; under an ISS these functions report simulated cycles rescaled by it, not
-wall-clock time. For performance work report cycles — `harness/run.sh` reads
-them from gem5's `stats.txt` and never asks the guest what time it is.
+**What remains true.** Under an ISS these functions report *simulated* time:
+cycles rescaled by `_LVX_CPU_FREQ`. That is now exact rather than nominal,
+since the constant and the ISS clock domain agree — but it is still not
+wall-clock time, and on real silicon at a different clock it would be wrong
+again. For performance work report cycles: `harness/run.sh` reads them from
+gem5's `stats.txt` and never asks the guest what time it is.
 
 ## 2a. What the timing gap looked like
 
@@ -233,8 +253,9 @@ it prints it on exit — but the guest cannot see it.
 
 **The work:** define `__lvx_counter_num` and `__lvx_cluster_timestamp` over
 `FRCC` (the frequencies they scale by are already in `mbr/lvx/cpu.h`:
-`_LVX_CPU_FREQ` 800 MHz, `__LVX_CLOCKS_PER_SEC__` 10^6, `_LVX_TIMESTAMP_FREQ`
-10^8), and make the ISS's `FRCC` read return the current cycle. Until the
+`_LVX_CPU_FREQ`, `__LVX_CLOCKS_PER_SEC__` 10^6, `_LVX_TIMESTAMP_FREQ`
+10^8 — and check the first against the ISS clock domain, it was KVX's 800 MHz
+against gem5's 1 GHz), and make the ISS's `FRCC` read return the current cycle. Until the
 second half is done the first half links but reports zero elapsed time, which is
 worse than a link error because it looks like a measurement.
 

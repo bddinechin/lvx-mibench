@@ -27,7 +27,9 @@
 basicmath_small | automotive/basicmath | basicmath_small.c rad2deg.c cubic.c isqrt.c | - | - | automotive/basicmath/output_small.txt
 # bitcount prints the elapsed time of each of its seven kernels, so its output
 # is NOT comparable to a reference: the numbers come from clock(), which on an
-# ISS measures simulated cycles rescaled by a nominal 800 MHz.  Tracked for its
+# ISS measures simulated cycles rescaled by _LVX_CPU_FREQ (1 GHz, matching the
+# ISS clock domain -- so they are exact simulated time, not wall clock, and a
+# change of either constant moves them).  Tracked for its
 # metrics, which is what it is here for -- it is seven bit-counting kernels and
 # the only benchmark in the suite whose timing path exercises $frcc at all.
 bitcnts         | automotive/bitcount  | bitcnt_1.c bitcnt_2.c bitcnt_3.c bitcnt_4.c bitcnts.c bitfiles.c bitstrng.c bstr_i.c | 75000 | - | -
