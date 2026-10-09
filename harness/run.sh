@@ -76,7 +76,16 @@ outdir="$repo/results"; mkdir -p "$outdir"
 tsv="$outdir/$ARCH-O$OPT-$stamp.tsv"
 work=$(mktemp -d); trap 'rm -rf "$work"' 0 1 2 3 15
 
-printf 'benchmark\tarch\topt\tcorrect\tcycles\tbundles_dyn\ttext_bytes\tinsns_static\tbundles_static\n' > "$tsv"
+HEADER='benchmark\tarch\topt\tcorrect\tcycles\tbundles_dyn\ttext_bytes\tinsns_static\tbundles_static'
+
+# Rows are collected here and merged into $tsv at the end.  Writing $tsv
+# directly would make an ONLY= run DESTROY a full baseline: the file is named
+# by arch, opt and date only, so a one-benchmark re-run opens the same path and
+# truncates it.  That happened on 2026-10-09 -- `ONLY=bitcnts' wiped a complete
+# 13-row lvx-2 baseline taken an hour before, and the numbers compared against
+# it were no longer reproducible from the tree.  Merging instead makes the
+# re-run do the useful thing: replace that benchmark's row, keep the rest.
+rows="$work/rows.tsv"; : > "$rows"
 printf '%-18s %-9s %12s %12s %10s %9s\n' BENCHMARK CORRECT CYCLES BUNDLES_DYN TEXT INSNS
 
 while IFS='|' read -r name dir srcs args stdin ref; do
@@ -92,7 +101,7 @@ while IFS='|' read -r name dir srcs args stdin ref; do
         > "$bdir/build.log" 2>&1
     if [ ! -f "$bdir/$name.elf" ]; then
         printf '%-18s %-9s %12s %12s %10s %9s\n' "$name" BUILDFAIL - - - -
-        printf '%s\t%s\t%s\tbuildfail\t\t\t\t\t\n' "$name" "$ARCH" "$OPT" >> "$tsv"
+        printf '%s\t%s\t%s\tbuildfail\t\t\t\t\t\n' "$name" "$ARCH" "$OPT" >> "$rows"
         continue
     fi
 
@@ -105,7 +114,7 @@ while IFS='|' read -r name dir srcs args stdin ref; do
     if [ "$STATIC_ONLY" = 1 ]; then
         printf '%-18s %-9s %12s %12s %10s %9s\n' "$name" static - - "$text" "$insns"
         printf '%s\t%s\t%s\tstatic\t\t\t%s\t%s\t%s\n' \
-               "$name" "$ARCH" "$OPT" "$text" "$insns" "$sbundles" >> "$tsv"
+               "$name" "$ARCH" "$OPT" "$text" "$insns" "$sbundles" >> "$rows"
         continue
     fi
 
@@ -181,8 +190,29 @@ while IFS='|' read -r name dir srcs args stdin ref; do
            "$name" "$correct" "${cycles:-?}" "${dynb:-?}" "$text" "$insns"
     printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
            "$name" "$ARCH" "$OPT" "$correct" "${cycles:-}" "${dynb:-}" \
-           "$text" "$insns" "$sbundles" >> "$tsv"
+           "$text" "$insns" "$sbundles" >> "$rows"
 done < "$here/benchmarks.def"
+
+# Merge: this run's rows win, rows for benchmarks it did not run are kept from
+# whatever was already in $tsv, and the order follows benchmarks.def so two
+# files always line up for compare.sh.
+if [ -f "$tsv" ]; then
+    awk -F'\t' 'NR==FNR { if (FNR>1) seen[$1]=1; next }
+                 FNR>1 && !($1 in seen) { print }' "$rows" "$tsv" >> "$rows"
+fi
+{
+    printf "$HEADER\n"
+    # benchmarks.def order, then anything left (a row whose line was removed).
+    awk -F'|' '/^[^#]/ && NF>1 { gsub(/ /,"",$1); if ($1!="") print $1 }' \
+        "$here/benchmarks.def" |
+    while read -r n; do
+        awk -F'\t' -v n="$n" '$1==n' "$rows"
+    done
+    awk -F'|' '/^[^#]/ && NF>1 { gsub(/ /,"",$1); if ($1!="") print $1 }' \
+        "$here/benchmarks.def" > "$work/known"
+    awk -F'\t' 'NR==FNR { k[$1]=1; next } !($1 in k) { print }' \
+        "$work/known" "$rows"
+} > "$tsv.new" && mv "$tsv.new" "$tsv"
 
 echo
 echo "wrote $tsv"
