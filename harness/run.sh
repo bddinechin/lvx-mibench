@@ -197,7 +197,13 @@ done < "$here/benchmarks.def"
 # whatever was already in $tsv, and the order follows benchmarks.def so two
 # files always line up for compare.sh.
 if [ -f "$tsv" ]; then
-    awk -F'\t' 'NR==FNR { if (FNR>1) seen[$1]=1; next }
+    # NOT `if (FNR>1)' on $rows: $rows carries no header line, so that guard
+    # skipped its FIRST row and left that one unmarked -- the baseline's copy
+    # was then appended as well and the kernel appeared TWICE in the merged
+    # file, with the stale row sorting first.  The merge exists to stop an
+    # ONLY= re-run from destroying a baseline, which it did; it was silently
+    # duplicating instead.  Found 2026-10-09 by an ONLY=gramschmidt re-run.
+    awk -F'\t' 'NR==FNR { seen[$1]=1; next }
                  FNR>1 && !($1 in seen) { print }' "$rows" "$tsv" >> "$rows"
 fi
 {
