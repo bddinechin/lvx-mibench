@@ -19,7 +19,8 @@ execution probe: the subset that built, under the ISS.
 **The ISA is not a gap.** All 18 targets compile and link identically on lvx-1
 and lvx-2 — the build-probe summaries are byte-identical between cores — and
 `basicmath_small`, which is almost entirely `double` arithmetic (`sqrt`, `sin`,
-`cos`, cubic roots), runs to completion in 61,347,468 cycles. Nothing in the
+`cos`, cubic roots), runs to completion in 61,347,468 cycles on its shipped
+small input. Nothing in the
 suite asked for an instruction the assembler could not provide, on either core.
 The gaps are all runtime: the ISS, the C library, and the crt0 between them.
 
@@ -122,18 +123,22 @@ absent.** Two sides, deliberately matched:
 **How it shows up** — and it is worth knowing because none of these looks like
 an argv problem:
 
+All at *small* inputs, and the cycle figures are only meaningful for the two
+rows that did real work — the rest never reached their data, which is the point
+of the table.
+
 | benchmark | arguments it wants | observed |
 |---|---|---|
-| `basicmath_small` | none | **ok**, 61,347,468 cycles |
-| `search_small` | none | **ok**, 248,001 cycles |
-| `crc32` | a file | exit 0, **66,274 cycles, no output** — silently took its no-file path and did no work |
+| `basicmath_small` | none | **ok**, 61,347,468 cycles — shipped small |
+| `search_small` | none | **ok**, 248,001 cycles — shipped small |
+| `adpcm_rawcaudio` | none (stdin) | **ok**, 42,554,668 cycles on `data/small.pcm` — real work |
+| `crc32` | a file | exit 0, **66,274 cycles, no output** — took its no-file path and did no work. (Its `runme_small.sh` wants the 25 MB *large* pcm; MiBench ships it no small input.) |
 | `qsort_small` | a file | exit −1, 67,860 cycles |
 | `fft` | two numbers | exit −1, 71,235 cycles |
 | `rijndael` | in, out, mode, key | exit −1, 69,122 cycles |
 | `dijkstra_small` | a file | **`fatal: readBlob(0x8, ...) failed`** — a NULL `argv[1]` dereference inside the ISS |
 | `susan` | file, file, flag | exit 0, 79,800 cycles, **no work** — printed usage and `exit(0)` |
 | `sha` | a file | **hung** to the 30-minute timeout: with `argc < 2` it falls back to `stdin`, which was not redirected |
-| `adpcm_rawcaudio` | none (stdin) | **ok**, 42,554,668 cycles — real work |
 
 The correlation is exact: **every benchmark that takes no argument works, every
 benchmark that takes one does not.** Hello-world costs 69,412 cycles on this
@@ -303,18 +308,44 @@ means overriding the recipe rather than setting `CC`.
   wrong-answer found (§4) was an environment difference, and LVX matches native
   bit-for-bit once the benchmark is made portable.
 
-## Benchmarks that run a real workload today
+## Benchmarks that run a real workload today — and on which input
 
-| benchmark | core | cycles | how |
-|---|---|---|---|
-| `basicmath_small` | lvx-2 | 61,347,468 | no arguments |
-| `fft 4 16` | lvx-2 | — | arguments, since 2026-10-09 |
-| `adpcm_rawcaudio` | lvx-2 | 42,554,668 | `stdin` from `small.pcm` |
-| `sha` | lvx-2 | 12,848,200 | `stdin` from `input_small.asc` |
-| `search_small` | lvx-2 | 248,001 | no arguments |
+**Small only. No Large variant has ever been executed here**, though
+`basicmath_large`, `qsort_large`, `dijkstra_large` and `search_large` all
+compile and link. And two of the small runs below used an input *smaller* than
+the one `runme_small.sh` names, because the atomic CPU model could not finish
+the shipped one — so read the cycle counts as "this input, this core", never as
+a MiBench score.
 
-Four of eighteen, and `sha`'s output is wrong until §4 is addressed. Everything
-else waits on §1.
+| benchmark | core | input actually used | as shipped? | cycles |
+|---|---|---|---|---|
+| `basicmath_small` | lvx-2 | none (self-generated) | **yes** | 61,347,468 |
+| `adpcm_rawcaudio` | lvx-2 | `stdin` < `data/small.pcm`, 1,368,864 B | **yes** | 42,554,668 |
+| `sha` | lvx-2 | `stdin` < `input_small.asc`, 311,824 B | **yes** | 12,848,200 |
+| `search_small` | lvx-2 | none (strings compiled in) | **yes** | 248,001 |
+| `qsort_small` | lvx-2 | `head -200 input_small.dat` | **no** — 200 of 10,000 lines | — |
+| `fft` | lvx-2 | `4 16` | **no** — `runme_small.sh` says `4 4096` | — |
+
+The two reductions were deliberate and prove different things. `qsort_small`
+was trimmed to show that `argv` reached it and the named file opened, which a
+200-line sort establishes in minutes where 10,000 lines takes hours. `fft 4
+4096` — the real small size — **was killed at 90 minutes**; `4 16` is 256x less
+work and was run only to compare its output against native, which is how the
+`rand()` divergence below was found.
+
+Two traps in MiBench's own scripts, not substitutions of mine:
+
+- **`crc32`'s `runme_small.sh` uses the LARGE input**: `crc ../adpcm/data/large.pcm`,
+  25 MB. There is no small input for it. The 66,274-cycle figure in §1a is it
+  doing nothing, not a measurement.
+- `sha`'s small input is 312 KB, which is already 12.8 M cycles; its large one
+  is 3.1 MB.
+
+So: four of eighteen run a real workload, `sha`'s output is wrong until §4 is
+addressed, and the suite is **not** runnable at shipped-small size wholesale on
+the atomic CPU. That is a throughput limit rather than a gap, and it is the
+prerequisite for any timing comparison: a faster CPU model, or MiBench's own
+reduced inputs. Everything else waits on §1.
 
 ## Reproducing
 
