@@ -9,7 +9,8 @@ execution probe: the subset that built, under the ISS.
 
 | # | gap | where | blocks |
 |---|---|---|---|
-| 1 | **no `argv` reaches the guest** | `lvx-gem5` + `lvx-newlib` crt0 | most of MiBench |
+| 1 | ~~no `argv` reaches the guest~~ | **FIXED 2026-10-09** | — |
+| 1b | **`strtol`/`atoi` returns `LONG_MAX`** | `lvx-newlib` or codegen | `fft`, anything parsing a number |
 | 2 | **no guest-visible time source** | `lvx-newlib` + `lvx-gem5` | all timing, and `bitcount` outright |
 | 3 | **missing BSD/network headers** | `lvx-newlib` | `patricia` |
 | 4 | **newlib does not leak `LITTLE_ENDIAN`** | `lvx-newlib` vs glibc | `sha` — *silently wrong output* |
@@ -22,7 +23,54 @@ and lvx-2 — the build-probe summaries are byte-identical between cores — and
 suite asked for an instruction the assembler could not provide, on either core.
 The gaps are all runtime: the ISS, the C library, and the crt0 between them.
 
-## 1. No `argv` reaches the guest
+## 1. No `argv` reaches the guest — FIXED 2026-10-09
+
+**Fixed** in lvx-gem5 `86f2a4c27b` (`Process::argsInit` builds the System V
+block; `run_lvx.py` passes the guest's arguments) and lvx-newlib `4af017d`
+(`_start` captures `$r12` into `$r0` before the tail jump, and `__start0`
+decodes argc/argv/envp off it). `argc=4` for three arguments on both cores,
+quoted arguments intact, `argc=1` and a valid `envp` with none, and the stack
+pointer `main` sees is 0 mod 32. validation 55/55 both cores at -O0/-O2/-O3 and
+run_diff.sh 96/96 — the regression that mattered, since the stack layout moved.
+
+The description below is kept because it is what the symptoms looked like, and
+because the next person to see `fatal: readBlob(0x8, ...)` should recognise it.
+
+### 1b. `strtol`/`atoi` can return `LONG_MAX` — found behind the argv fix
+
+With arguments arriving, `fft 4 16` got as far as parsing them and then died
+`fatal: writeBlob(0, ...)`. Instrumented, the cause is that `atoi("16")`
+returned −1 and `MAXSIZE` became 4294967295, so `malloc(4 * 4294967295)` gave
+NULL and FFT — which checks none of its six `malloc`s — wrote through it.
+
+The underlying fault is `strtol` reporting overflow on values that do not
+overflow. It is **not** a clean value rule, which is what makes it interesting:
+
+```
+program whose first libc call is atoi:   strtol("16")   = 9223372036854775807
+program that printf's first:             strtol("16")   = 16
+                                         strtol("4096") = 9223372036854775807
+                                         strtol("2147483647") = 9223372036854775807
+```
+
+`LONG_MAX` is the saturated return `strtol` gives on `ERANGE`, and `atoi` is
+`(int)` of it, hence −1. Same on lvx-1 and lvx-2, same at `-O0` and `-O2`, so
+not an optimiser artefact. The dependence on what ran before it points at
+uninitialised state rather than arithmetic — and 64-bit division is fine
+(`LONG_MAX/10` and `LONG_MAX%10` both print correctly), which rules out the
+obvious suspect in `strtol`'s cutoff computation.
+
+**It is pre-existing, not a consequence of the argv change.** Verified by
+checking out the previous `crt0.c`, rebuilding newlib, confirming `_start` is
+again the bare `goto`, and re-running: byte-identical wrong answers. (A first
+attempt to verify this was invalid — `git stash push` on an
+already-committed file stashes nothing, so both runs used the new crt0.
+Check that the file actually changed.)
+
+This is the next thing to chase, and it is worth more than the remaining gaps
+below: `atoi` is how most of MiBench reads its parameters.
+
+## 1a. What the argv gap looked like
 
 The decisive measurement — a three-line program:
 
