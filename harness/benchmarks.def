@@ -1,0 +1,41 @@
+# MiBench benchmarks the LVX toolchain can build, one per line.
+#
+#   name | dir | sources | args | stdin | reference-output
+#
+# `args' are relative to the benchmark's own directory, which the
+# runner copies into a scratch dir before running -- the benchmarks write their
+# output files beside their inputs, so they must not run in the source tree.
+# `stdin' is relative to the repository root, because adpcm's data sits one
+# level above its sources.
+# `-' means none.  A reference of `-' means upstream ships none for this
+# invocation, so only the metrics are recorded.
+#
+# WHAT IS NOT HERE, and why:
+#   bitcount     calls clock(), which needs __lvx_counter_num -- undefined in
+#                lvx-newlib, so it does not link.  See GAPS.md section 2.
+#   patricia     needs err.h / netinet/in.h, which newlib does not ship.
+#   jpeg lame mad tiff typeset ghostscript ispell rsynth sphinx
+#                do not build here: autoconf, libtiff, or a 20 MB model.
+#
+# The invocations follow each benchmark's own runme_small.sh.  Two deviations,
+# both forced and both noted on the line:
+#   crc32        runme_small.sh reads ../adpcm/data/large.pcm, 25 MB -- MiBench
+#                ships crc32 no small input at all.  We use small.pcm instead,
+#                so the cycle count is NOT comparable to a published crc32
+#                figure, and there is no reference output for it.
+#   fft          runme_small.sh says `4 4096'; that exceeded 90 minutes on the
+#                atomic CPU.  `4 1024' is the tracked size.  Same caveat.
+
+basicmath_small | automotive/basicmath | basicmath_small.c rad2deg.c cubic.c isqrt.c | - | - | automotive/basicmath/output_small.txt
+qsort_small     | automotive/qsort     | qsort_small.c                               | input_small.dat | - | automotive/qsort/output_small.txt
+susan_smoothing | automotive/susan     | susan.c                                     | input_small.pgm output.pgm -s | - | automotive/susan/output_small.smoothing.pgm
+susan_edges     | automotive/susan     | susan.c                                     | input_small.pgm output.pgm -e | - | automotive/susan/output_small.edges.pgm
+susan_corners   | automotive/susan     | susan.c                                     | input_small.pgm output.pgm -c | - | automotive/susan/output_small.corners.pgm
+dijkstra_small  | network/dijkstra     | dijkstra_small.c                            | input.dat | - | network/dijkstra/output_small.dat
+crc32           | telecomm/CRC32       | crc_32.c                                    | small.pcm | - | -
+fft             | telecomm/FFT         | fftmisc.c fourierf.c main.c                 | 4 1024 | - | -
+adpcm_rawcaudio | telecomm/adpcm/src   | adpcm.c rawcaudio.c                         | - | telecomm/adpcm/data/small.pcm | telecomm/adpcm/output_small.adpcm
+adpcm_rawdaudio | telecomm/adpcm/src   | adpcm.c rawdaudio.c                         | - | telecomm/adpcm/data/small.adpcm | telecomm/adpcm/output_small.pcm
+sha             | security/sha         | sha.c sha_driver.c                          | input_small.asc | - | security/sha/output_small.txt
+rijndael_enc    | security/rijndael    | aes.c aesxam.c                              | input_small.asc output.enc e 1234567890abcdeffedcba09876543211234567890abcdeffedcba0987654321 | - | -
+search_small    | office/stringsearch  | bmhasrch.c bmhisrch.c bmhsrch.c pbmsrch_small.c | - | - | office/stringsearch/output_small.txt

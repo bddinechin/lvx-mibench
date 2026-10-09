@@ -1,0 +1,7 @@
+# Benchmarks write their output beside their inputs; the harness runs in a
+# scratch copy, but a manual run in the source tree leaves these behind.
+output_small*
+output_large*
+m5out/
+*.o
+*.elf

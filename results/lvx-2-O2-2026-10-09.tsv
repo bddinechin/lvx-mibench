@@ -1,0 +1,6 @@
+benchmark	arch	opt	correct	cycles	bundles_dyn	text_bytes	insns_static	bundles_static
+basicmath_small	lvx-2	2	fp-6ulp	91849059	44381447	70464	15062	8854
+adpcm_rawcaudio	lvx-2	2	ok	42554637	16482362	58936	12738	7431
+adpcm_rawdaudio	lvx-2	2	ok	30918608	9638042	58936	12738	7431
+sha	lvx-2	2	ok	13400010	4662646	61760	13505	7911
+search_small	lvx-2	2	ok	248138	139955	61416	13272	7781
