@@ -10,7 +10,7 @@ execution probe: the subset that built, under the ISS.
 | # | gap | where | blocks |
 |---|---|---|---|
 | 1 | ~~no `argv` reaches the guest~~ | **FIXED 2026-10-09** | — |
-| 1b | **`strtol`/`atoi` returns `LONG_MAX`** | `lvx-newlib` or codegen | `fft`, anything parsing a number |
+| 1b | ~~`strtol`/`atoi` returns `LONG_MAX`~~ | **FIXED 2026-10-09** — stale objects | — |
 | 2 | **no guest-visible time source** | `lvx-newlib` + `lvx-gem5` | all timing, and `bitcount` outright |
 | 3 | **missing BSD/network headers** | `lvx-newlib` | `patricia` |
 | 4 | **newlib does not leak `LITTLE_ENDIAN`** | `lvx-newlib` vs glibc | `sha` — *silently wrong output* |
@@ -67,8 +67,29 @@ attempt to verify this was invalid — `git stash push` on an
 already-committed file stashes nothing, so both runs used the new crt0.
 Check that the file actually changed.)
 
-This is the next thing to chase, and it is worth more than the remaining gaps
-below: `atoi` is how most of MiBench reads its parameters.
+**Cause: the installed newlib was stale.** `libc_a-strtol.o` dated 2026-09-28
+— eleven days old — and so did **3124 of the build tree's 3241 objects**.
+Newlib's build depends on its sources, not on the compiler, so an unchanged
+`strtol.c` keeps whatever object an earlier lvx-gcc produced, and every
+compiler fix since is absent from libc. Recompiling that one file from the same
+source with the same flags gave the right answer, which is the test that tells a
+stale object from a live miscompile and should be the first thing tried when a
+libc function misbehaves.
+
+Fixed by forcing a full rebuild — `find . -name '*.o' -delete`, same for
+`*.a`, then `make && make install` — after which `strtol("4096")` is 4096 and
+`atoi` is correct on both cores, with validation 55/55 and run_diff.sh 96/96
+unchanged. Recorded in the top-level `README.md` under `lvx-newlib`, because
+`make` will not do it and nothing diagnoses it: the library builds, links and
+mostly works.
+
+Worth knowing about the symptom, since it misled this investigation for a
+while: it looked like uninitialised memory. The same call succeeded or failed
+depending on what had run before it, because the surrounding data differed.
+Four hypotheses were tested and rejected first — runtime 64-bit division
+(correct), `isspace`/`isdigit` classification (correct), a hand-written replica
+of newlib's exact algorithm (correct), and the digit scan itself (`endptr`
+showed exactly 4 characters consumed, so only the overflow test was wrong).
 
 ## 1a. What the argv gap looked like
 
@@ -287,6 +308,7 @@ means overriding the recipe rather than setting `CC`.
 | benchmark | core | cycles | how |
 |---|---|---|---|
 | `basicmath_small` | lvx-2 | 61,347,468 | no arguments |
+| `fft 4 16` | lvx-2 | — | arguments, since 2026-10-09 |
 | `adpcm_rawcaudio` | lvx-2 | 42,554,668 | `stdin` from `small.pcm` |
 | `sha` | lvx-2 | 12,848,200 | `stdin` from `input_small.asc` |
 | `search_small` | lvx-2 | 248,001 | no arguments |
@@ -303,3 +325,20 @@ The probe scripts are not committed; they are three loops over
 from each `Makefile`'s `gcc` recipe. Worth turning into a harness beside
 `validation/run.sh` once §1 and §2 land — before that, a harness could only run
 the two no-argument benchmarks.
+
+## `fft` is not a cross-libc oracle, and neither is anything using `rand()`
+
+`fft` builds its input from `srand(1)` and `rand()`, and the two libcs do not
+agree on the sequence:
+
+```
+glibc  rand()%1000: 383 886 777 915 793 335
+newlib rand()%1000: 933 743 262 529 700 508
+```
+
+So `fft`'s output differs from a native build by design, and the difference says
+nothing about LVX. Compare it against another newlib run, or feed it a
+deterministic input. Checked after the stale-newlib fix, when `fft 4 16` first
+ran to completion and its numbers did not match native — the second time in this
+exercise that a cross-libc comparison looked like a miscompile and was not
+(`sha` and `LITTLE_ENDIAN` was the first).
