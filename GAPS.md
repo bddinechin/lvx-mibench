@@ -11,7 +11,7 @@ execution probe: the subset that built, under the ISS.
 |---|---|---|---|
 | 1 | ~~no `argv` reaches the guest~~ | **FIXED 2026-10-09** | — |
 | 1b | ~~`strtol`/`atoi` returns `LONG_MAX`~~ | **FIXED 2026-10-09** — stale objects | — |
-| 2 | **no guest-visible time source** | `lvx-newlib` + `lvx-gem5` | all timing, and `bitcount` outright |
+| 2 | ~~no guest-visible time source~~ | **FIXED 2026-10-09** | — |
 | 3 | **missing BSD/network headers** | `lvx-newlib` | `patricia` |
 | 4 | **newlib does not leak `LITTLE_ENDIAN`** | `lvx-newlib` vs glibc | `sha` — *silently wrong output* |
 | 5 | legacy-C build flags needed | neither — the benchmarks | nothing, once known |
@@ -162,7 +162,44 @@ both take their usage path and `exit(0)`. A harness that checks only the exit
 code will score them as passes. Check the output, or the cycle count against
 hello-world's ~69,400.
 
-## 2. No guest-visible time source — the timing question
+## 2. No guest-visible time source — FIXED 2026-10-09
+
+**Fixed** in lvx-gem5 `7c5021d405` and lvx-newlib `522540d`. `$frcc` is now
+derived from the CPU's cycle count rather than read as storage, and
+`counters.c` defines the three accessors that were declared and defined
+nowhere. `clock()`, `times()` and `gettimeofday()` link and return real
+numbers, and `bitcount` builds and runs for the first time — 14 of the 18 probe
+targets now, where it was 13.
+
+Two things found on the way, both of the silent kind:
+
+- The ISS change had to go in `readSfr`/`writeSfr`, the funnel every path
+  shares. A first attempt put it in `readSfrFromStorage_SRS`, which reaches
+  only the seven exceptions in `generated/regfile_map.inc` — `FRCC` is not one
+  — while `GET` runs through `Behavior_readFromStorage_SRS`, which calls
+  `readSfr` directly. It built cleanly and `$frcc` still read 0. Handling it in
+  both would have added the cycle count *twice* on one path.
+- **`CLOCKS_PER_SEC` was wrong by 1000x**, and only visible once all three
+  functions worked. `times.c` scales by `_LVX_CPU_FREQ /
+  __LVX_CLOCKS_PER_SEC__`, which `cpu.h` sets to 10^6, but
+  `newlib/libc/include/machine/time.h` listed only `__rtems__`, `__VISIUM__`,
+  `__riscv` and `__CLUSTER_OS__` for microsecond `CLOCKS_PER_SEC` — so LVX fell
+  through to `time.h`'s default of 1000. `clock()` returned microsecond units
+  while `CLOCKS_PER_SEC` claimed milliseconds, so any program dividing by it
+  over-reported elapsed time by 1000x. `gettimeofday` was right all along,
+  which is what exposed it.
+
+Measured on both cores around a 1,274,569-cycle loop: `clock()` 1500 us,
+`gettimeofday` 1500 us, `times` utime 1582 — consistent with each other and
+with 1.27M cycles at the nominal 800 MHz. validation 55/55 both cores and
+run_diff.sh 96/96 unchanged.
+
+**One caveat that does not go away.** `_LVX_CPU_FREQ` is a nominal 800 MHz in a
+header; under an ISS these functions report simulated cycles rescaled by it, not
+wall-clock time. For performance work report cycles — `harness/run.sh` reads
+them from gem5's `stats.txt` and never asks the guest what time it is.
+
+## 2a. What the timing gap looked like
 
 Two independent failures stacked on top of each other.
 

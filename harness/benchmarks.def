@@ -11,8 +11,6 @@
 # invocation, so only the metrics are recorded.
 #
 # WHAT IS NOT HERE, and why:
-#   bitcount     calls clock(), which needs __lvx_counter_num -- undefined in
-#                lvx-newlib, so it does not link.  See GAPS.md section 2.
 #   patricia     needs err.h / netinet/in.h, which newlib does not ship.
 #   jpeg lame mad tiff typeset ghostscript ispell rsynth sphinx
 #                do not build here: autoconf, libtiff, or a 20 MB model.
@@ -27,6 +25,12 @@
 #                atomic CPU.  `4 1024' is the tracked size.  Same caveat.
 
 basicmath_small | automotive/basicmath | basicmath_small.c rad2deg.c cubic.c isqrt.c | - | - | automotive/basicmath/output_small.txt
+# bitcount prints the elapsed time of each of its seven kernels, so its output
+# is NOT comparable to a reference: the numbers come from clock(), which on an
+# ISS measures simulated cycles rescaled by a nominal 800 MHz.  Tracked for its
+# metrics, which is what it is here for -- it is seven bit-counting kernels and
+# the only benchmark in the suite whose timing path exercises $frcc at all.
+bitcnts         | automotive/bitcount  | bitcnt_1.c bitcnt_2.c bitcnt_3.c bitcnt_4.c bitcnts.c bitfiles.c bitstrng.c bstr_i.c | 75000 | - | -
 qsort_small     | automotive/qsort     | qsort_small.c                               | input_small.dat | - | automotive/qsort/output_small.txt
 susan_smoothing | automotive/susan     | susan.c                                     | input_small.pgm output.pgm -s | - | automotive/susan/output_small.smoothing.pgm
 susan_edges     | automotive/susan     | susan.c                                     | input_small.pgm output.pgm -e | - | automotive/susan/output_small.edges.pgm
