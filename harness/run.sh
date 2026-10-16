@@ -5,9 +5,15 @@
 #   ARCH=lvx-1 OPT=3 ./harness/run.sh
 #   STATIC_ONLY=1 ./harness/run.sh        # build + static metrics, no ISS
 #   ONLY='sha fft' ./harness/run.sh       # a subset
+#   COMPILER=clang ./harness/run.sh       # lvx-llvm instead of lvx-gcc
 #
 # Writes one TSV row per benchmark to results/<arch>-O<opt>-<date>.tsv and a
 # human summary to stdout.  Compare two runs with harness/compare.sh.
+#
+# COMPILER=clang writes results/<arch>-clang-O<opt>-<date>.tsv instead: the
+# compiler is part of the configuration name, because a GCC row and a clang row
+# of one benchmark are two series, not two samples of one.  GCC stays unmarked
+# so the series that predates clang keeps its name.
 #
 # WHY CYCLES AND NOT TIME.  The ISS is deterministic: the same ELF yields the
 # same cycle count every run, on any host, with no quiet-machine ritual and no
@@ -145,7 +151,18 @@ ONLY=${ONLY:-}
 TIMEOUT=${TIMEOUT:-5400}
 
 TOOLS=${LVX_TOOLS:-$CSW/lvx-toolchain/bin}
-GCC=$TOOLS/lvx-mbr-gcc
+# The core is spelled -march by lvx-gcc and -mcpu by clang, so the flag is
+# chosen here with the compiler, never by a caller.  It mattered: until
+# lvx-llvm d7a03955 (2026-10-16) clang took -march=lvx-2 as an unused argument,
+# warned, and built for its default core -- lvx-1 code, timed as lvx-2.  -march
+# is an alias there now, but -mcpu is clang's own spelling and right on every
+# build.
+COMPILER=${COMPILER:-gcc}
+case "$COMPILER" in
+    gcc)   XCC=$TOOLS/lvx-mbr-gcc;   cpuflag="-march=$ARCH"; ctag="" ;;
+    clang) XCC=$TOOLS/lvx-mbr-clang; cpuflag="-mcpu=$ARCH";  ctag="-clang" ;;
+    *) echo "COMPILER must be gcc or clang (got $COMPILER)" >&2; exit 2 ;;
+esac
 OBJDUMP=$TOOLS/lvx-mbr-objdump
 SIZE=$TOOLS/lvx-mbr-size
 GEM5=${GEM5:-$CSW/lvx-gem5/build/gem5-lvx$core.opt}
@@ -155,12 +172,14 @@ LDSCRIPTS=${LDSCRIPTS:-$CSW/lvx-newlib/libgloss/lvx-mbr/linker_scripts}
 # -std=gnu89 -fpermissive is not optional: MiBench is 1990s C and GCC 17
 # rejects implicit declarations, implicit int and return-type mismatches by
 # default.  Without these flags 11 of 18 targets fail to compile, which says
-# nothing about LVX.  -T lvx-sim.ld supplies sbrk's _heap_start/_heap_end;
+# nothing about LVX.  clang takes the same pair: gnu89 permits implicit
+# declarations and implicit int, and -fpermissive is accepted and ignored.
+# -T lvx-sim.ld supplies sbrk's _heap_start/_heap_end;
 # without it a hosted link leaves them undefined and malloc has no heap.
-CFLAGS="-O$OPT -march=$ARCH -std=gnu89 -fpermissive -ffreestanding -fno-strict-aliasing"
+CFLAGS="-O$OPT $cpuflag -std=gnu89 -fpermissive -ffreestanding -fno-strict-aliasing"
 LDFLAGS="-T lvx-sim.ld -L$LDSCRIPTS -lm"
 
-for t in "$GCC" "$OBJDUMP" "$SIZE"; do
+for t in "$XCC" "$OBJDUMP" "$SIZE"; do
     [ -x "$t" ] || { echo "missing tool: $t" >&2; exit 2; }
 done
 if [ "$STATIC_ONLY" != 1 ]; then
@@ -169,7 +188,7 @@ fi
 
 stamp=$(date +%Y-%m-%d)
 outdir="$repo/results"; mkdir -p "$outdir"
-tsv="$outdir/$ARCH-O$OPT-$stamp.tsv"
+tsv="$outdir/$ARCH$ctag-O$OPT-$stamp.tsv"
 work=$(mktemp -d); trap 'rm -rf "$work"' 0 1 2 3 15
 
 HEADER='benchmark\tarch\topt\tcorrect\tcycles\tbundles_dyn\ttext_bytes\tinsns_static\tbundles_static'
@@ -193,7 +212,7 @@ while IFS='|' read -r name dir srcs args stdin ref; do
 
     # --- build, out of tree, so the source stays pristine
     bdir="$work/$name"; mkdir -p "$bdir"
-    ( cd "$repo/$dir" && $GCC $CFLAGS -I. $srcs $LDFLAGS -o "$bdir/$name.elf" ) \
+    ( cd "$repo/$dir" && $XCC $CFLAGS -I. $srcs $LDFLAGS -o "$bdir/$name.elf" ) \
         > "$bdir/build.log" 2>&1
     if [ ! -f "$bdir/$name.elf" ]; then
         printf '%-18s %-9s %12s %12s %10s %9s\n' "$name" BUILDFAIL - - - -

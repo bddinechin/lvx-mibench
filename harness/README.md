@@ -5,11 +5,18 @@
 ARCH=lvx-1 OPT=3 ./harness/run.sh
 STATIC_ONLY=1 ./harness/run.sh          # build + static metrics only, minutes
 ONLY='sha fft' ./harness/run.sh         # a subset
+COMPILER=clang ./harness/run.sh         # lvx-llvm instead of lvx-gcc
 ./harness/compare.sh results/A.tsv results/B.tsv
 ```
 
 Results land in `results/<arch>-O<opt>-<date>.tsv`, one row per benchmark.
 Commit them: the series is the point, and `compare.sh` diffs two of them.
+
+`COMPILER=clang` builds with lvx-llvm instead of lvx-gcc and writes
+`results/<arch>-clang-O<opt>-<date>.tsv` — a separate series. The harness picks
+the core flag with the compiler (`-mcpu` for clang); sweep clang on lvx-2 only,
+since the installed lvx-llvm holds `lvx_v2`. `-std=gnu89
+-fpermissive` serve clang as they serve GCC.
 
 ## Why cycles, not time
 
