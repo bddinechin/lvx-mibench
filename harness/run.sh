@@ -39,7 +39,103 @@ set -u
 
 here="$(cd "$(dirname "$0")" && pwd)"
 repo="$(dirname "$here")"
-CSW="$(cd "$repo/.." && pwd)"
+# --- Locating lvx-csw ------------------------------------------------------
+#
+# This benchmark measures a toolchain that is a BUILD PRODUCT of a *built*
+# lvx-csw checkout: lvx-toolchain/bin and lvx-gem5/build are in nobody's git.
+# So lvx-csw's location is a PARAMETER of this harness, never an assumption.
+#
+# It used to be "$repo/..", which held only while this repository was a
+# submodule of lvx-csw. It is a submodule of lvx-perf now, so that guess
+# resolved to lvx-perf -- which has no toolchain in it at all.
+#
+# Precedence, highest first:
+#   --csw <path>                explicit, for a one-off or a CI job
+#   $LVX_CSW                    environment, for a shell session
+#   <lvx-perf>/lvx-csw.path     one line, per machine, not committed
+#   <lvx-perf>/../lvx-csw       the default: the two checkouts as siblings
+#   <this repo>/../lvx-csw      same idea, for a standalone clone
+#
+# A path given explicitly is never silently replaced by a fallback: name a
+# tree and get told which mechanism named it, rather than measuring another
+# checkout's compiler by accident.
+
+csw_from=
+csw_path=
+_rest=()
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --csw)   [ $# -ge 2 ] || { echo "--csw needs a path" >&2; exit 2; }
+                 csw_path=$2; csw_from='--csw'; shift 2 ;;
+        --csw=*) csw_path=${1#--csw=}; csw_from='--csw'; shift ;;
+        *)       _rest+=("$1"); shift ;;
+    esac
+done
+set -- ${_rest[@]+"${_rest[@]}"}
+
+_super=$(git -C "$repo" rev-parse --show-superproject-working-tree 2>/dev/null) || _super=
+[ -n "${_super:-}" ] || _super=
+
+if [ -z "$csw_path" ] && [ -n "${LVX_CSW:-}" ]; then
+    csw_path=$LVX_CSW; csw_from='$LVX_CSW'
+fi
+if [ -z "$csw_path" ] && [ -n "$_super" ] && [ -r "$_super/lvx-csw.path" ]; then
+    # One path per file, '#' comments allowed; a relative path is relative to
+    # lvx-perf, so a committed-by-accident file still means the same thing.
+    csw_path=$(sed -e 's/#.*//' -e 's/[[:space:]]*$//' "$_super/lvx-csw.path" \
+               | grep -v '^[[:space:]]*$' | head -1)
+    if [ -n "$csw_path" ]; then
+        csw_from="$_super/lvx-csw.path"
+        case $csw_path in /*) ;; *) csw_path=$_super/$csw_path ;; esac
+    fi
+fi
+if [ -z "$csw_path" ]; then
+    for _c in ${_super:+"$_super/../lvx-csw"} "$repo/../lvx-csw"; do
+        if [ -d "$_c/lvx-mds" ] || [ -d "$_c/validation" ]; then
+            csw_path=$_c; csw_from='default sibling'; break
+        fi
+    done
+fi
+
+if [ -z "$csw_path" ]; then
+    _hint=${_super:-<lvx-perf>}
+    cat >&2 <<EOM
+error: cannot find lvx-csw, and this benchmark cannot run without it: it
+       measures the toolchain that lvx-csw builds.
+
+Name a location -- highest precedence first:
+    $(basename "$0") --csw /path/to/lvx-csw
+    LVX_CSW=/path/to/lvx-csw $(basename "$0")
+    echo /path/to/lvx-csw > $_hint/lvx-csw.path
+or put the two checkouts side by side, which is the default:
+    $_hint/../lvx-csw
+EOM
+    exit 2
+fi
+
+[ -d "$csw_path" ] || {
+    echo "error: lvx-csw path does not exist: $csw_path  (from $csw_from)" >&2
+    exit 2
+}
+CSW=$(cd "$csw_path" && pwd)
+if [ ! -d "$CSW/lvx-mds" ] && [ ! -d "$CSW/validation" ]; then
+    echo "error: $CSW does not look like an lvx-csw checkout  (from $csw_from)" >&2
+    echo "       expected lvx-mds/ and validation/ inside it" >&2
+    exit 2
+fi
+# lvx-toolchain/ is a build product and is not versioned, so "there but not
+# built" is the ordinary failure here, not a broken tree. Say which it is.
+if [ -z "${LVX_TOOLS:-}" ] && [ ! -x "$CSW/lvx-toolchain/bin/lvx-mbr-gcc" ]; then
+    echo "error: $CSW has no built cross-toolchain  (from $csw_from)" >&2
+    echo "       expected lvx-toolchain/bin/lvx-mbr-gcc" >&2
+    echo "       build it:  make -C '$CSW' install-minimal-toolchain" >&2
+    echo "       or point past it:  LVX_TOOLS=<dir>" >&2
+    exit 2
+fi
+# Children and recursive invocations inherit the decision rather than redoing
+# it -- a child must not re-resolve to a different tree midway.
+export LVX_CSW="$CSW"
+# --- end locating lvx-csw --------------------------------------------------
 
 ARCH=${ARCH:-lvx-2}
 OPT=${OPT:-2}
