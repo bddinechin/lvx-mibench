@@ -165,7 +165,7 @@ case "$COMPILER" in
 esac
 OBJDUMP=$TOOLS/lvx-mbr-objdump
 SIZE=$TOOLS/lvx-mbr-size
-GEM5=${GEM5:-$CSW/lvx-gem5/build/gem5-lvx$core.opt}
+GEM5=${GEM5:-$CSW/lvx-gem5/build/gem5-lvx-$core.opt}
 GEM5_CFG=${GEM5_CFG:-$CSW/lvx-gem5/tests/lvx/run_lvx.py}
 LDSCRIPTS=${LDSCRIPTS:-$CSW/lvx-newlib/libgloss/lvx-mbr/linker_scripts}
 

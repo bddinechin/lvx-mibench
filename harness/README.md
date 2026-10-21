@@ -15,7 +15,7 @@ Commit them: the series is the point, and `compare.sh` diffs two of them.
 `COMPILER=clang` builds with lvx-llvm instead of lvx-gcc and writes
 `results/<arch>-clang-O<opt>-<date>.tsv` — a separate series. The harness picks
 the core flag with the compiler (`-mcpu` for clang); sweep clang on lvx-2 only,
-since the installed lvx-llvm holds `lvx_v2`. `-std=gnu89
+since the installed lvx-llvm holds `lvx_2`. `-std=gnu89
 -fpermissive` serve clang as they serve GCC.
 
 ## Why cycles, not time
