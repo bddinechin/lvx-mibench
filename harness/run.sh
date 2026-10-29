@@ -191,7 +191,37 @@ outdir="$repo/results"; mkdir -p "$outdir"
 tsv="$outdir/$ARCH$ctag-O$OPT-$stamp.tsv"
 work=$(mktemp -d); trap 'rm -rf "$work"' 0 1 2 3 15
 
+# lvx-perf's bin/lvx-rev-stamp owns the provenance columns, and is called
+# rather than copied -- this suite has no single licence across its programs,
+# which is the strongest possible reason not to copy a file into it, and
+# executing a script is not deriving from it. A standalone checkout with no
+# superproject records `unknown' rather than failing.
+#
+# Per row, not per sweep. This suite needs that most: a full sweep is 14
+# programs of tens to hundreds of millions of cycles under the ISS, so it runs
+# long enough for a toolchain to be reinstalled underneath it -- and a
+# once-per-sweep stamp would hide exactly that.
+super=$(git -C "$repo" rev-parse --show-superproject-working-tree 2>/dev/null) || super=
+STAMP=
+[ -n "$super" ] && [ -x "$super/bin/lvx-rev-stamp" ] && STAMP="$super/bin/lvx-rev-stamp"
+stamp_cols=(csw_rev gcc_rev gem5_rev cc_mtime)
+stamp_header() {
+    if [ -n "$STAMP" ]; then "$STAMP" --tsv-header
+    else (IFS=$'\t'; printf '%s\n' "${stamp_cols[*]}"); fi
+}
+stamp_row() {
+    if [ -n "$STAMP" ]; then "$STAMP" --tsv-row ${CSW:+--csw "$CSW"}
+    else
+        local u=() c
+        for c in "${stamp_cols[@]}"; do u+=(unknown); done
+        (IFS=$'\t'; printf '%s\n' "${u[*]}")
+    fi
+}
+
 HEADER='benchmark\tarch\topt\tcorrect\tcycles\tbundles_dyn\ttext_bytes\tinsns_static\tbundles_static'
+HEADER="$HEADER\t$(stamp_header | sed 's/\t/\\t/g')"
+# The field count the carry-over below pads stale rows up to.
+want_fields=$(printf "$HEADER\n" | awk -F'\t' '{print NF}')
 
 # Rows are collected here and merged into $tsv at the end.  Writing $tsv
 # directly would make an ONLY= run DESTROY a full baseline: the file is named
@@ -216,7 +246,8 @@ while IFS='|' read -r name dir srcs args stdin ref; do
         > "$bdir/build.log" 2>&1
     if [ ! -f "$bdir/$name.elf" ]; then
         printf '%-18s %-9s %12s %12s %10s %9s\n' "$name" BUILDFAIL - - - -
-        printf '%s\t%s\t%s\tbuildfail\t\t\t\t\t\n' "$name" "$ARCH" "$OPT" >> "$rows"
+        printf '%s\t%s\t%s\tbuildfail\t\t\t\t\t\t%s\n' \
+               "$name" "$ARCH" "$OPT" "$(stamp_row)" >> "$rows"
         continue
     fi
 
@@ -228,8 +259,9 @@ while IFS='|' read -r name dir srcs args stdin ref; do
 
     if [ "$STATIC_ONLY" = 1 ]; then
         printf '%-18s %-9s %12s %12s %10s %9s\n' "$name" static - - "$text" "$insns"
-        printf '%s\t%s\t%s\tstatic\t\t\t%s\t%s\t%s\n' \
-               "$name" "$ARCH" "$OPT" "$text" "$insns" "$sbundles" >> "$rows"
+        printf '%s\t%s\t%s\tstatic\t\t\t%s\t%s\t%s\t%s\n' \
+               "$name" "$ARCH" "$OPT" "$text" "$insns" "$sbundles" \
+               "$(stamp_row)" >> "$rows"
         continue
     fi
 
@@ -303,9 +335,9 @@ while IFS='|' read -r name dir srcs args stdin ref; do
 
     printf '%-18s %-9s %12s %12s %10s %9s\n' \
            "$name" "$correct" "${cycles:-?}" "${dynb:-?}" "$text" "$insns"
-    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
            "$name" "$ARCH" "$OPT" "$correct" "${cycles:-}" "${dynb:-}" \
-           "$text" "$insns" "$sbundles" >> "$rows"
+           "$text" "$insns" "$sbundles" "$(stamp_row)" >> "$rows"
 done < "$here/benchmarks.def"
 
 # Merge: this run's rows win, rows for benchmarks it did not run are kept from
@@ -318,8 +350,13 @@ if [ -f "$tsv" ]; then
     # file, with the stale row sorting first.  The merge exists to stop an
     # ONLY= re-run from destroying a baseline, which it did; it was silently
     # duplicating instead.  Found 2026-10-09 by an ONLY=gramschmidt re-run.
-    awk -F'\t' 'NR==FNR { seen[$1]=1; next }
-                 FNR>1 && !($1 in seen) { print }' "$rows" "$tsv" >> "$rows"
+    awk -F'\t' -v OFS='\t' -v want="$want_fields" 'NR==FNR { seen[$1]=1; next }
+                 FNR>1 && !($1 in seen) {
+                   # A baseline row predating the provenance columns is
+                   # shorter than the header. Pad it, so a one-benchmark
+                   # re-run cannot leave the merged file ragged.
+                   for (i = NF + 1; i <= want; i++) $i = ""
+                   print }' "$rows" "$tsv" >> "$rows"
 fi
 {
     printf "$HEADER\n"
