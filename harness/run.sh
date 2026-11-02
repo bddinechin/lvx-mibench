@@ -201,7 +201,14 @@ if [ "$STATIC_ONLY" != 1 ]; then
 fi
 
 stamp=$(date +%Y-%m-%d)
-outdir="$repo/results"; mkdir -p "$outdir"
+# RESULTS_DIR redirects the TSVs somewhere else, so a throwaway run cannot
+# clobber the committed baseline. A re-run of a configuration REPLACES its
+# file, by design -- but that makes a one-line probe destructive: checking
+# that a compiler flag reaches the compiler at all needs a build to FAIL,
+# and the failing rows then overwrite real numbers. Probe into a scratch
+# directory instead:
+#   RESULTS_DIR=$(mktemp -d) LVX_EXTRA_CFLAGS=-mbogus ./harness/run.sh
+outdir="${RESULTS_DIR:-$repo/results}"; mkdir -p "$outdir"
 tsv="$outdir/$ARCH$ctag-O$OPT-$stamp.tsv"
 work=$(mktemp -d); trap 'rm -rf "$work"' 0 1 2 3 15
 
