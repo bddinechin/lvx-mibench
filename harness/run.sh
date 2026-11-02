@@ -4,6 +4,8 @@
 #   ./harness/run.sh                      # lvx-2, -O2, run + measure
 #   ARCH=lvx-1 OPT=3 ./harness/run.sh
 #   STATIC_ONLY=1 ./harness/run.sh        # build + static metrics, no ISS
+#   LVX_EXTRA_CFLAGS='-mcms-probe' ./harness/run.sh   # CROSS-only extra flags
+#                                         (never reaches the x86 oracle)
 #   ONLY='sha fft' ./harness/run.sh       # a subset
 #   COMPILER=clang ./harness/run.sh       # lvx-llvm instead of lvx-gcc
 #
@@ -177,6 +179,18 @@ LDSCRIPTS=${LDSCRIPTS:-$CSW/lvx-newlib/libgloss/lvx-mbr/linker_scripts}
 # -T lvx-sim.ld supplies sbrk's _heap_start/_heap_end;
 # without it a hosted link leaves them undefined and malloc has no heap.
 CFLAGS="-O$OPT $cpuflag -std=gnu89 -fpermissive -ffreestanding -fno-strict-aliasing"
+
+# LVX_EXTRA_CFLAGS: extra flags for the CROSS compile only.
+#
+# It is appended last so it overrides the defaults above, and it is placed
+# here, and this suite builds nothing natively in this script at all, so it
+# cannot reach a host build. That separation is the whole point: an
+# LVX-only flag like -mcms-probe would fail the host build outright, and a
+# flag that silently changed the oracle would invalidate the checksums the
+# oracle exists to provide. lvx-csw's validation/cms/gate.sh hit the mirror
+# of this and had to add a separate GATE_EXTRA knob after a measurement was
+# believed that had tested the default.
+CFLAGS="$CFLAGS ${LVX_EXTRA_CFLAGS:-}"
 LDFLAGS="-T lvx-sim.ld -L$LDSCRIPTS -lm"
 
 for t in "$XCC" "$OBJDUMP" "$SIZE"; do
